@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="Labour Activity Monitoring System — predict worker activity from accelerometer data using a deep learning model.">
+    <title>Labour Activity Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+
+<body>
+
+    <!-- Animated background blobs -->
+    <div class="bg-blob blob-1"></div>
+    <div class="bg-blob blob-2"></div>
+    <div class="bg-blob blob-3"></div>
+
+    <main class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-icon">👷</div>
+            <h1>Labour Activity Monitor</h1>
+            <p class="subtitle">Real-time worker activity classification powered by deep learning</p>
+        </header>
+
+        <!-- ============================================ -->
+        <!-- LIVE MONITORING SECTION                      -->
+        <!-- ============================================ -->
+        <section class="card live-card" id="live-card">
+            <div class="live-header">
+                <h2 class="card-title">🔴 Live Sensor Monitor</h2>
+                <div class="live-btns">
+                    <button class="btn-toggle btn-sm" id="recalibrate-btn" onclick="recalibrate()" style="display:none;"
+                        title="Re-calibrate sensor baseline">⟳ Recalibrate</button>
+                    <button class="btn-toggle btn-sm" id="debug-toggle-btn" onclick="toggleDebug()"
+                        title="Toggle debug info">🐛 Debug</button>
+                    <button class="btn-toggle" id="live-toggle-btn" onclick="toggleLive()">
+                        <span id="toggle-text">Start Live</span>
+                    </button>
+                </div>
+            </div>
+            <p class="card-desc">Connect Arduino (MPU6050) to stream real-time accelerometer data</p>
+
+            <!-- Connection + calibration status -->
+            <div class="status-row" id="status-row">
+                <span class="status-dot disconnected" id="status-dot"></span>
+                <span class="status-label" id="status-label">Disconnected</span>
+                <span class="calib-badge" id="calib-badge" style="display:none;">Calibrating…</span>
+                <span class="buffer-info" id="buffer-info">Buffer: 0 / 50</span>
+            </div>
+
+            <!-- Processed sensor values (Accelerometer) -->
+            <div class="sensor-section-label">Accelerometer (processed)</div>
+            <div class="live-values-grid" id="live-values">
+                <div class="live-value-box">
+                    <span class="live-axis">AX</span>
+                    <span class="live-num" id="live-ax">—</span>
+                </div>
+                <div class="live-value-box">
+                    <span class="live-axis">AY</span>
+                    <span class="live-num" id="live-ay">—</span>
+                </div>
+                <div class="live-value-box">
+                    <span class="live-axis">AZ</span>
+                    <span class="live-num" id="live-az">—</span>
+                </div>
+            </div>
+
+            <!-- Gyroscope values (shown when available) -->
+            <div id="gyro-section" style="display:none;">
+                <div class="sensor-section-label">Gyroscope</div>
+                <div class="live-values-grid" id="gyro-values">
+                    <div class="live-value-box gyro-box">
+                        <span class="live-axis gyro-axis">GX</span>
+                        <span class="live-num" id="live-gx">—</span>
+                    </div>
+                    <div class="live-value-box gyro-box">
+                        <span class="live-axis gyro-axis">GY</span>
+                        <span class="live-num" id="live-gy">—</span>
+                    </div>
+                    <div class="live-value-box gyro-box">
+                        <span class="live-axis gyro-axis">GZ</span>
+                        <span class="live-num" id="live-gz">—</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Debug panel (collapsible) -->
+            <div class="debug-panel" id="debug-panel" style="display:none;">
+                <div class="debug-title">🐛 Debug Info</div>
+                <div class="debug-grid">
+                    <div class="debug-item">
+                        <span class="debug-key">Raw values</span>
+                        <span class="debug-val" id="debug-raw">—</span>
+                    </div>
+                    <div class="debug-item">
+                        <span class="debug-key">Baseline offset</span>
+                        <span class="debug-val" id="debug-baseline">—</span>
+                    </div>
+                    <div class="debug-item">
+                        <span class="debug-key">Last update</span>
+                        <span class="debug-val" id="debug-timestamp">—</span>
+                    </div>
+                    <div class="debug-item">
+                        <span class="debug-key">Buffer</span>
+                        <span class="debug-val" id="debug-buffer">—</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live prediction result -->
+            <div class="live-prediction" id="live-prediction" style="display:none;">
+                <div class="live-pred-badge" id="live-pred-badge">
+                    <span id="live-pred-icon">⏳</span>
+                    <span id="live-pred-label">Waiting for data…</span>
+                </div>
+            </div>
+
+            <!-- Live error message -->
+            <div class="live-error" id="live-error" style="display:none;">
+                <span class="alert-icon">⚠️</span>
+                <span id="live-error-msg"></span>
+            </div>
+        </section>
+
+        <!-- ============================================ -->
+        <!-- MANUAL INPUT SECTION                         -->
+        <!-- ============================================ -->
+        {% if error %}
+        <div class="alert alert-error" id="error-alert">
+            <span class="alert-icon">⚠️</span>
+            <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
+        <section class="card" id="input-card">
+            <h2 class="card-title">Manual Input</h2>
+            <p class="card-desc">Or enter acceleration values manually to test the model</p>
+
+            <form action="/predict" method="POST" class="form">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="xacc">X-Axis Acceleration</label>
+                        <input type="text" id="xacc" name="xacc" placeholder="e.g. -0.494"
+                            value="{{ xacc if xacc else '' }}" autocomplete="off">
+                        <span class="input-hint">xacc</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="yacc">Y-Axis Acceleration</label>
+                        <input type="text" id="yacc" name="yacc" placeholder="e.g. 0.050"
+                            value="{{ yacc if yacc else '' }}" autocomplete="off">
+                        <span class="input-hint">yacc</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="zacc">Z-Axis Acceleration</label>
+                        <input type="text" id="zacc" name="zacc" placeholder="e.g. 0.295"
+                            value="{{ zacc if zacc else '' }}" autocomplete="off">
+                        <span class="input-hint">zacc</span>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-predict" id="predict-btn">
+                    <span class="btn-text">Predict Activity</span>
+                    <span class="btn-arrow">→</span>
+                </button>
+            </form>
+        </section>
+
+        <!-- Manual result card -->
+        {% if prediction %}
+        <section class="card result-card {{ 'result-working' if prediction == 'Working' else 'result-not-working' }}"
+            id="result-card">
+            <h2 class="card-title">Manual Prediction Result</h2>
+
+            <div class="result-badge">
+                <span class="result-icon">
+                    {% if prediction == "Working" %}✅{% else %}⛔{% endif %}
+                </span>
+                <span class="result-label">{{ prediction }}</span>
+            </div>
+
+
+            <div class="result-details">
+                <div class="detail-chip">X: {{ xacc }}</div>
+                <div class="detail-chip">Y: {{ yacc }}</div>
+                <div class="detail-chip">Z: {{ zacc }}</div>
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Labour Activity Monitoring System &mdash; Capstone Project</p>
+        </footer>
+    </main>
+
+    <!-- ============================================ -->
+    <!-- JAVASCRIPT: Live data polling                -->
+    <!-- ============================================ -->
+    <script>
+        // ---- State ----
+        let liveInterval = null;
+        let isLive = false;
+        let showDebug = false;
+
+        // ---- DOM references ----
+        const toggleBtn = document.getElementById("live-toggle-btn");
+        const toggleText = document.getElementById("toggle-text");
+        const recalBtn = document.getElementById("recalibrate-btn");
+        const debugToggleBtn = document.getElementById("debug-toggle-btn");
+        const debugPanel = document.getElementById("debug-panel");
+        const statusDot = document.getElementById("status-dot");
+        const statusLabel = document.getElementById("status-label");
+        const calibBadge = document.getElementById("calib-badge");
+        const bufferInfo = document.getElementById("buffer-info");
+        const liveAx = document.getElementById("live-ax");
+        const liveAy = document.getElementById("live-ay");
+        const liveAz = document.getElementById("live-az");
+        const liveGx = document.getElementById("live-gx");
+        const liveGy = document.getElementById("live-gy");
+        const liveGz = document.getElementById("live-gz");
+        const gyroSection = document.getElementById("gyro-section");
+        const livePredDiv = document.getElementById("live-prediction");
+        const livePredIcon = document.getElementById("live-pred-icon");
+        const livePredLabel = document.getElementById("live-pred-label");
+        const livePredBadge = document.getElementById("live-pred-badge");
+        const liveErrorDiv = document.getElementById("live-error");
+        const liveErrorMsg = document.getElementById("live-error-msg");
+
+        // Debug panel elements
+        const debugRaw = document.getElementById("debug-raw");
+        const debugBaseline = document.getElementById("debug-baseline");
+        const debugTimestamp = document.getElementById("debug-timestamp");
+        const debugBuffer = document.getElementById("debug-buffer");
+
+        // ---- Toggle live mode ----
+        function toggleLive() {
+            if (isLive) { stopLive(); } else { startLive(); }
+        }
+
+        function startLive() {
+            isLive = true;
+            toggleBtn.classList.add("active");
+            toggleText.textContent = "Stop Live";
+            recalBtn.style.display = "inline-flex";
+            livePredDiv.style.display = "block";
+            fetchLiveData();
+            liveInterval = setInterval(fetchLiveData, 1000);
+        }
+
+        function stopLive() {
+            isLive = false;
+            toggleBtn.classList.remove("active");
+            toggleText.textContent = "Start Live";
+            recalBtn.style.display = "none";
+            if (liveInterval) clearInterval(liveInterval);
+            liveInterval = null;
+        }
+
+        // ---- Toggle debug panel ----
+        function toggleDebug() {
+            showDebug = !showDebug;
+            debugPanel.style.display = showDebug ? "block" : "none";
+            debugToggleBtn.classList.toggle("active", showDebug);
+        }
+
+        // ---- Trigger re-calibration ----
+        async function recalibrate() {
+            try {
+                await fetch("/recalibrate", { method: "POST" });
+                calibBadge.textContent = "Recalibrating…";
+                calibBadge.className = "calib-badge calibrating";
+                calibBadge.style.display = "inline";
+            } catch (e) { /* ignore */ }
+        }
+
+        // ---- Helper: format array for display ----
+        function fmtArr(arr) {
+            if (!arr || !Array.isArray(arr)) return "—";
+            return "[" + arr.map(v => v.toFixed(2)).join(", ") + "]";
+        }
+
+        // ---- Pulse animation helper ----
+        function pulseEl(el) {
+            el.classList.remove("pulse");
+            void el.offsetWidth;
+            el.classList.add("pulse");
+        }
+
+        // ---- Fetch live data from Flask backend ----
+        async function fetchLiveData() {
+            try {
+                const resp = await fetch("/live-data");
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+
+                // -- Connection status --
+                if (data.connected) {
+                    statusDot.className = "status-dot connected";
+                    statusLabel.textContent = "Connected";
+                } else {
+                    statusDot.className = "status-dot disconnected";
+                    statusLabel.textContent = "Disconnected";
+                }
+
+                // -- Calibration status --
+                if (data.connected && data.calibrated) {
+                    calibBadge.textContent = "Calibrated ✓";
+                    calibBadge.className = "calib-badge calibrated";
+                    calibBadge.style.display = "inline";
+                } else if (data.connected && !data.calibrated) {
+                    calibBadge.textContent = "Calibrating…";
+                    calibBadge.className = "calib-badge calibrating";
+                    calibBadge.style.display = "inline";
+                } else {
+                    calibBadge.style.display = "none";
+                }
+
+                // -- Buffer info --
+                bufferInfo.textContent = `Buffer: ${data.buffer_count} / 50`;
+
+                // -- Processed accelerometer values --
+                if (data.sensor_values && data.sensor_values.length >= 3) {
+                    liveAx.textContent = data.sensor_values[0].toFixed(2);
+                    liveAy.textContent = data.sensor_values[1].toFixed(2);
+                    liveAz.textContent = data.sensor_values[2].toFixed(2);
+                    [liveAx, liveAy, liveAz].forEach(pulseEl);
+                } else {
+                    liveAx.textContent = "—";
+                    liveAy.textContent = "—";
+                    liveAz.textContent = "—";
+                }
+
+                // -- Gyroscope values (show section if data available) --
+                if (data.gyro_values && data.gyro_values.length >= 3) {
+                    gyroSection.style.display = "block";
+                    liveGx.textContent = data.gyro_values[0].toFixed(2);
+                    liveGy.textContent = data.gyro_values[1].toFixed(2);
+                    liveGz.textContent = data.gyro_values[2].toFixed(2);
+                    [liveGx, liveGy, liveGz].forEach(pulseEl);
+                }
+
+                // -- Debug panel --
+                if (showDebug) {
+                    debugRaw.textContent = fmtArr(data.sensor_values_raw);
+                    debugBaseline.textContent = fmtArr(data.baseline);
+                    debugTimestamp.textContent = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : "—";
+                    debugBuffer.textContent = `${data.buffer_count} / 50 ${data.buffer_ready ? "✓ Ready" : "⏳ Filling"}`;
+                }
+
+                // -- Prediction --
+                if (data.prediction) {
+                    const isWorking = data.prediction === "Working";
+                    livePredIcon.textContent = isWorking ? "✅" : "⛔";
+                    livePredLabel.textContent = data.prediction;
+                    livePredBadge.className = "live-pred-badge " + (isWorking ? "badge-working" : "badge-not-working");
+
+                } else if (data.buffer_ready === false && data.connected) {
+                    livePredIcon.textContent = "⏳";
+                    livePredLabel.textContent = data.calibrated ? "Filling buffer…" : "Calibrating sensor…";
+                    livePredBadge.className = "live-pred-badge";
+                } else {
+                    livePredIcon.textContent = "⏳";
+                    livePredLabel.textContent = "Waiting for sensor…";
+                    livePredBadge.className = "live-pred-badge";
+                }
+
+                // -- Errors --
+                if (data.error) {
+                    liveErrorDiv.style.display = "flex";
+                    liveErrorMsg.textContent = data.error;
+                } else {
+                    liveErrorDiv.style.display = "none";
+                }
+
+            } catch (err) {
+                liveErrorDiv.style.display = "flex";
+                liveErrorMsg.textContent = "Failed to fetch live data: " + err.message;
+            }
+        }
+    </script>
+
+</body>
+
+</html>
